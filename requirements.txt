@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+faiss-cpu
+sentence-transformers
+groq
+numpy
+pydantic
+python-dotenv
+langgraph
+langchain
+langchain-groq
+rank_bm25
+pymupdf
+pytesseract
+reportlab
