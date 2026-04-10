@@ -92,30 +92,33 @@ Return ONLY valid JSON, no markdown, no extra text:
     return {"results": [], "overall_score": 0, "overall_feedback": "Could not parse evaluation. Raw: " + raw[:200]}
 
 
-def question_generator(topic_context: list) -> str:
+def question_generator(topic_context: list, session_summary: str = "") -> str:
     """
-    Generates a new quiz question based on the loaded knowledge base context.
+    Generates a new, unique quiz question based on the knowledge base + session summary.
     """
     context_text = "\n".join(topic_context) if topic_context else ""
-    if not context_text:
+    if not context_text and not session_summary:
         return "What is the main concept you have learned so far?"
 
-    prompt = f"""Based on the following educational content, generate ONE concise quiz question to test student understanding.
+    summary_block = f"What the student has been studying:\n{session_summary}\n\n" if session_summary else ""
 
-Content:
+    prompt = f"""You are an expert quiz creator for students.
+
+{summary_block}Knowledge Base Content:
 {context_text}
 
-Rules:
-- Ask about a specific fact or concept from the content
-- Keep it clear and unambiguous
-- Do not repeat obvious or trivial questions
+Generate ONE thoughtful quiz question that:
+- Tests a specific, important concept from the content above
+- Is directly related to what the student has been studying
+- Is clear, unambiguous, and appropriate for a student
+- Is NOT trivial or a yes/no question
 
-Return ONLY the question text, no extra formatting."""
+Return ONLY the question text. No numbering, no preamble."""
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=80
+        max_tokens=150
     )
     return response.choices[0].message.content.strip()

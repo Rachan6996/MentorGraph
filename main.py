@@ -213,7 +213,7 @@ def quiz_next(req: QuizAnswerRequest):
     """Save current Q&A, return a freshly generated next question."""
     add_answer(req.question, req.student_answer)
     context = search(req.question, top_k=3)
-    next_q = question_generator(context)
+    next_q = question_generator(context, session_summary=get_summary())
     return {"status": "saved", "answered_count": get_count(), "next_question": next_q}
 
 @app.post("/quiz/review")
