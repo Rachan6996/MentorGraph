@@ -27,15 +27,31 @@ def tutor_node(state: AgentState):
     )
     data = extract_json(res_raw)
     
-    if not data:
+    if data and isinstance(data, dict):
         return {
-            "tutor_explanation": res_raw,
-            "follow_up": "Do you have any thoughts on this?"
+            "tutor_explanation": data.get("explanation", ""),
+            "follow_up": data.get("follow_up_question", "")
         }
     
+    # Fallback: try to extract explanation from raw text
+    import re
+    exp_match = re.search(r'"explanation"\s*:\s*"(.*?)"', res_raw, re.DOTALL)
+    fu_match = re.search(r'"follow_up_question"\s*:\s*"(.*?)"', res_raw, re.DOTALL)
+    
+    if exp_match:
+        return {
+            "tutor_explanation": exp_match.group(1).replace('\\n', '\n'),
+            "follow_up": fu_match.group(1) if fu_match else ""
+        }
+    
+    # Last resort: strip JSON artifacts and show clean text
+    clean = re.sub(r'[{}"\\]', '', res_raw).strip()
+    clean = re.sub(r'explanation\s*:', '', clean).strip()
+    clean = re.sub(r'follow_up_question\s*:.*', '', clean, flags=re.DOTALL).strip()
+    
     return {
-        "tutor_explanation": data.get("explanation"),
-        "follow_up": data.get("follow_up_question")
+        "tutor_explanation": clean or res_raw,
+        "follow_up": ""
     }
 
 def evaluator_node(state: AgentState):

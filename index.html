@@ -1538,12 +1538,11 @@
             <!-- ── F: FINAL OUTPUT ── -->
             <div class="view" id="view-finaloutput">
                 <div style="max-width:820px;margin:0 auto;padding:30px 20px;">
-                    <div class="section-heading">Final Output — Unified JSON</div>
-                    <p style="font-size:12px;color:var(--muted);margin-bottom:20px;">The complete decision record:
-                        question, AI answer, AI score, human override (final score), feedback, and source documents.</p>
-                    <div id="final-output-list">
-                        <div class="empty-state">Click to load final output…</div>
-                    </div>
+                    <div class="section-heading">Final Output</div>
+                    <p style="font-size:12px;color:var(--muted);margin-bottom:20px;">JSON containing question, AI
+                        answer, score, final score, feedback, and sources.</p>
+                    <pre id="final-output-json"
+                        style="background:#111;border:1px solid var(--border);border-radius:12px;padding:20px;font-size:12px;font-family:'Fira Code',monospace;color:#e0e0e0;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word;max-height:75vh;overflow-y:auto;line-height:1.6;">Click "Final Output" to load...</pre>
                 </div>
             </div>
 
@@ -1621,6 +1620,17 @@
         }
 
         // ── SECTION B: WORKSPACE ──
+        // ── SIMPLE MARKDOWN RENDERER ──
+        function simpleMarkdown(text) {
+            return text
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^### (.+)$/gm, '<h4 style="margin:10px 0 4px;font-size:14px;color:var(--text)">$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:15px;color:var(--text)">$1</h3>')
+                .replace(/^\d+\.\s+(.+)$/gm, '<li style="margin-left:16px;list-style:decimal;font-size:13px;">$1</li>')
+                .replace(/^[-•]\s+(.+)$/gm, '<li style="margin-left:16px;list-style:disc;font-size:13px;">$1</li>')
+                .replace(/\n/g, '<br>');
+        }
+
         function appendMsg(role, content, sources, followUp) {
             const stream = document.getElementById('chat-stream');
             const row = document.createElement('div');
@@ -1633,7 +1643,7 @@
                 const wrap = document.createElement('div');
                 const bubble = document.createElement('div');
                 bubble.className = 'msg-bubble';
-                bubble.textContent = content;
+                bubble.innerHTML = simpleMarkdown(content);
                 wrap.appendChild(bubble);
                 if (sources && sources.length) {
                     const btn = document.createElement('button');
@@ -1695,15 +1705,23 @@
             showSkeleton();
             setBtnLoading('chat-send', true);
 
-            // Update sidebar recents
+            // Update sidebar recents - only for unique, non-trivial questions
             const rec = document.getElementById('sidebar-recents');
-            if (rec.children.length === 1 && rec.children[0].tagName === 'DIV') rec.innerHTML = '';
-            const item = document.createElement('button');
-            item.className = 'nav-item';
-            item.style.fontSize = '12px';
-            item.textContent = question.slice(0, 30) + (question.length > 30 ? '…' : '');
-            item.onclick = () => askTutor(question);
-            rec.prepend(item);
+            const normalizedQ = question.trim().toLowerCase();
+            const existingItems = Array.from(rec.querySelectorAll('.nav-item'));
+            const alreadyExists = existingItems.some(item => item.textContent.toLowerCase().includes(normalizedQ.slice(0, 20)));
+
+            if (!alreadyExists && question.length > 5) {
+                if (rec.children.length === 1 && rec.children[0].textContent.includes('No sessions')) rec.innerHTML = '';
+                const item = document.createElement('button');
+                item.className = 'nav-item';
+                item.style.fontSize = '12px';
+                item.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" style="opacity:0.5"><path d="M3 8h10M3 4h10M3 12h5" /></svg> ` + (question.slice(0, 26) + (question.length > 26 ? '…' : ''));
+                item.onclick = () => { document.getElementById('discovery-input').value = question; startLearning(); };
+                rec.prepend(item);
+                // Keep only top 8 recents
+                while (rec.children.length > 8) rec.lastChild.remove();
+            }
 
             try {
                 const r = await fetch(`${BASE}/ask`, {
@@ -1721,6 +1739,19 @@
                 appendMsg('ai', explanation, sources, followUp);
                 document.getElementById('assess-question-text').textContent = followUp || question;
                 chatHistory.push({ role: 'user', content: question }, { role: 'assistant', content: explanation });
+
+                // Update the sidebar entry with a summary from the backend
+                try {
+                    const sm = await fetch(`${BASE}/memory`);
+                    const sd = await sm.json();
+                    if (sd.summary) {
+                        const firstItem = document.getElementById('sidebar-recents').firstChild;
+                        if (firstItem && firstItem.classList.contains('nav-item')) {
+                            const cleanSum = sd.summary.replace(/^Student asked about\s+/i, '');
+                            firstItem.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" style="opacity:0.5"><path d="M3 8h10M3 4h10M3 12h5" /></svg> ` + (cleanSum.slice(0, 26) + (cleanSum.length > 26 ? '…' : ''));
+                        }
+                    }
+                } catch (e) { /* silent fail for summary */ }
             } catch (e) {
                 removeSkeleton();
                 appendMsg('ai', 'Could not reach the server. Make sure the backend is running at ' + BASE, []);
@@ -2121,37 +2152,15 @@
 
         // ── SECTION F: FINAL OUTPUT ──
         async function loadFinalOutput() {
-            const list = document.getElementById('final-output-list');
-            list.innerHTML = '<div class="empty-state">Loading…</div>';
+            const pre = document.getElementById('final-output-json');
+            pre.textContent = 'Loading…';
             try {
                 const r = await fetch(`${BASE}/final-output`);
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const data = await r.json();
-                if (!data.length) { list.innerHTML = '<div class="empty-state">No records yet. Ask questions and take quizzes first.</div>'; return; }
-                list.innerHTML = '';
-                data.forEach((item, i) => {
-                    const card = document.createElement('div');
-                    card.style.cssText = 'background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px;';
-                    const scoreColor = item.final_score >= 7 ? 'var(--success)' : item.final_score >= 4 ? 'var(--warning)' : 'var(--danger)';
-                    const typeBadge = item.type === 'quiz' ? '<span style="font-size:10px;background:rgba(59,130,246,0.12);color:var(--primary);padding:2px 8px;border-radius:20px;font-weight:600;">QUIZ</span>' : '<span style="font-size:10px;background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:20px;font-weight:600;">CHAT</span>';
-                    const srcList = (item.sources || []).slice(0, 2).map(s => `<span style='font-size:10px;background:rgba(255,255,255,0.05);border:1px solid var(--border);padding:2px 8px;border-radius:6px;'>${typeof s === 'string' ? s.slice(0, 60) + '…' : 'doc'}</span>`).join(' ');
-                    card.innerHTML = `
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                            ${typeBadge}
-                            <span style="font-size:13px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.question}</span>
-                        </div>
-                        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5;">${(item.ai_answer || '').slice(0, 200)}${item.ai_answer && item.ai_answer.length > 200 ? '…' : ''}</div>
-                        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
-                            <span style="font-size:12px;">AI Score: <strong style="color:var(--primary)">${item.ai_score}/10</strong></span>
-                            <span style="font-size:12px;">Final Score: <strong style="color:${scoreColor}">${item.final_score}/10</strong></span>
-                        </div>
-                        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;"><em>${item.feedback || 'No feedback'}</em></div>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;">${srcList || '<span style="font-size:10px;color:var(--muted)">No sources</span>'}</div>
-                    `;
-                    list.appendChild(card);
-                });
+                pre.textContent = JSON.stringify(data, null, 2);
             } catch (e) {
-                list.innerHTML = '<div class="empty-state">Failed to load — ' + e.message + '</div>';
+                pre.textContent = 'Error: ' + e.message;
             }
         }
 

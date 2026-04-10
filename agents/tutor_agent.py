@@ -1,4 +1,5 @@
 import os
+import json
 from groq import Groq
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -7,11 +8,8 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 def tutor_agent(question: str, context: list, summary: str = "", recent_turns: str = ""):
     """
     Uses RAG context plus rolling memory summary to explain + ask follow-up.
-    Strictly answers from context only.
+    The LLM handles intent detection naturally — no hardcoded logic.
     """
-
-    if not context and not summary and not recent_turns:
-        return '{"explanation": "I don\'t have any documents loaded on this topic. Please upload a relevant document in the Discovery Hub first.", "follow_up_question": "Which subject would you like to upload study material for?"}'
 
     context_text = "\n\n".join(context) if context else ""
 
@@ -24,44 +22,53 @@ def tutor_agent(question: str, context: list, summary: str = "", recent_turns: s
 
     # If no context but we have session memory, use memory as the source
     if not context_text and (summary or recent_turns):
-        context_section = f"(No new documents matched. Answer based on the session memory below.)"
-    else:
+        context_section = "(No new documents matched. Answer based on the session memory below.)"
+    elif context_text:
         context_section = f"Knowledge Base Context:\n{context_text}"
+    else:
+        context_section = "(No documents loaded yet.)"
 
-    prompt = f"""You are a strict AI Tutor with memory of the ongoing session.
-You MUST answer using the provided information below.
-For follow-up questions, use the Recent Conversation and Session Summary as your primary source.
-Do NOT use any outside knowledge. Do NOT make up information.
-If neither the context nor the memory contains enough information, say:
-"I don't have enough information on this topic in my knowledge base."
+    prompt = f"""You are a world-class AI Tutor — friendly, clear, and thorough, just like ChatGPT.
+
+STEP 1 — DETECT INTENT:
+Read the student's message carefully. Determine if it is:
+A) A greeting or small talk (e.g. "Hi", "Hello", "kya kr rhe ho", "sup")
+B) A knowledge question about a topic
+
+STEP 2 — RESPOND ACCORDINGLY:
+
+If (A) Greeting/Small talk:
+- Respond warmly and conversationally, like a friendly teacher would.
+- Ask what topic they'd like to study today.
+- Do NOT include any technical content or reference session memory.
+- Keep it short and natural.
+
+If (B) Knowledge question:
+- Start with a **one-line bold summary** of the answer.
+- Then explain using a **Simple way to understand it** section with bullet points.
+- Add a **Real-life example** to make it relatable.
+- End with **Key takeaways** as a numbered list (2-3 points max).
+- Use markdown: **bold**, bullet points, numbered lists.
+- If the context covers the topic, use it. If not, use general knowledge and note "(Based on general knowledge)" at the end.
+
 {memory_block}
 {context_section}
 
-Student Question:
+Student Message:
 {question}
 
-Examples:
-1. Question: "What is evaporation?"
-   Context: "Evaporation is the process where liquid water turns into water vapor when heated."
-   Explanation: "Evaporation is when liquid water turns into vapor because of heat."
-   Follow-up: "Can you name one source of heat that causes this?"
-
-2. Question: "Why are plants green?"
-   Context: "Plants contain chlorophyll, a green pigment that absorbs sunlight for photosynthesis."
-   Explanation: "Plants are green because of a pigment called chlorophyll, which absorbs sunlight."
-   Follow-up: "What does the plant do with that absorbed sunlight?"
-
-Return ONLY JSON (no extra text):
+Return ONLY valid JSON (no extra text before or after):
 {{
-  "explanation": "clear explanation using ONLY the context above",
-  "follow_up_question": "one question to test understanding of the above explanation"
+  "explanation": "your response here",
+  "follow_up_question": "one engaging question to continue the conversation"
 }}
 """
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
+        temperature=0.7,
+        max_tokens=1024
     )
 
     return response.choices[0].message.content
